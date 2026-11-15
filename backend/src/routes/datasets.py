@@ -19,4 +19,7 @@ def create(data:DatasetInput,db=Depends(get_db),u=Depends(can_write)):
 def detail(id:int,db=Depends(get_db),u=Depends(current_user)):
     d=db.get(Dataset,id)
     if not d:raise HTTPException(404,'数据批次不存在')
+    if d.sealed:
+        # 封存即拦截读取：不返回任何客流记录，仅给封存状态
+        return {**dataset_dict(d),'sealed':True,'records':[]}
     return {**dataset_dict(d),'records':d.records}

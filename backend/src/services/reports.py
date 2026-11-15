@@ -1,17 +1,26 @@
 import time, os, csv, io, hashlib, json
 from fastapi import HTTPException
-from src.models import Job, Report, Delivery
+from sqlalchemy import select
+from src.models import Job, Report, Delivery, Dataset
 from src.config.settings import ARTIFACT_DIR
 def create(db, data):
     j=db.get(Job,data.job_id)
     if not j or j.status!='completed' or not j.approved:
         raise HTTPException(409,'请先选择已完成且获批准的分析结果')
+    d=db.get(Dataset,j.dataset_id)
+    if d is not None and d.sealed:
+        raise HTTPException(423,'该批次已封存销毁，禁止安排分发')
     r=Report(name=data.name, job_id=j.id, destination=data.destination, interval_seconds=data.interval_seconds, next_run=time.time()+data.delay_seconds, enabled=True)
     db.add(r); db.flush()
     return r
 def deliver(db, report):
     j=db.get(Job,report.job_id)
     if not j or not j.approved: return
+    d=db.get(Dataset,j.dataset_id)
+    if d is None or d.sealed:
+        # 封存/已销毁批次的简报不再投递，防止旧计划把内容写回收件箱
+        report.enabled=False
+        return
     out=io.StringIO()
     out.write('\ufeff')
     table=j.result.get('table',{})

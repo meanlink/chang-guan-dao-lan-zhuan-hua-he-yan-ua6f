@@ -4,13 +4,22 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from src.config.database import get_db
 from src.config.settings import ARTIFACT_DIR
-from src.models import Report, Delivery
+from src.models import Report, Delivery, Job, Dataset
 from src.schemas.report import ReportInput
 from src.middlewares.auth import current_user, admin_only
 from src.services import reports
 from src.services.audit import record
 from src.utils.serialization import report_dict, delivery_dict
 router=APIRouter()
+def _delivery_sealed(db, delivery):
+    report = db.get(Report, delivery.report_id)
+    if not report:
+        return False
+    job = db.get(Job, report.job_id)
+    if not job:
+        return False
+    dataset = db.get(Dataset, job.dataset_id)
+    return dataset is not None and dataset.sealed
 @router.get('/reports')
 def listing(db=Depends(get_db),u=Depends(current_user)):
     return [report_dict(r) for r in db.scalars(select(Report).order_by(Report.id.desc()))]
@@ -31,6 +40,7 @@ def deliveries(db=Depends(get_db),u=Depends(current_user)):
 def download(id:int,format:str='csv',db=Depends(get_db),u=Depends(current_user)):
     d=db.get(Delivery,id)
     if not d:raise HTTPException(404,'归档不存在')
+    if _delivery_sealed(db,d):raise HTTPException(423,'所属批次已封存销毁，下载已拦截')
     if format not in ('csv','json'):raise HTTPException(422,'支持 CSV 或 JSON')
     filename=d.filename+('.json' if format=='json' else '')
     p=os.path.join(ARTIFACT_DIR,filename)
